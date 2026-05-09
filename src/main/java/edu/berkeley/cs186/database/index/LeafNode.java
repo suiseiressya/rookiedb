@@ -120,6 +120,9 @@ class LeafNode extends BPlusNode {
 
     /**
      * Construct a leaf node that is persisted to page `page`.
+     *
+     * Flow: first create a new LeafNode object. Then call sync() to serialize (convert to bytes)
+     * and write the LeafNode (in bytes) to the page (a B+ tree node).
      */
     private LeafNode(BPlusTreeMetadata metadata, BufferManager bufferManager, Page page,
                      List<DataBox> keys,
@@ -369,6 +372,8 @@ class LeafNode extends BPlusNode {
 
     /**
      * Loads a leaf node from page `pageNum`.
+     *
+     * NOTE: Read toBytes() for better understanding of how to deserialize
      */
     public static LeafNode fromBytes(BPlusTreeMetadata metadata, BufferManager bufferManager,
                                      LockContext treeContext, long pageNum) {
@@ -376,8 +381,35 @@ class LeafNode extends BPlusNode {
         // Note: LeafNode has two constructors. To implement fromBytes be sure to
         // use the constructor that reuses an existing page instead of fetching a
         // brand new one.
+        Page page = bufferManager.fetchPage(treeContext, pageNum);
+        Buffer buf = page.getBuffer();
 
-        return null;
+        // AbstractBuffer::get(): get byte at current position then advance by byte.size() = 1
+        // Check the first byte to make sure this is a leaf node.
+        // Read toBytes() comments - when a leaf node is constructed, it initializes the first byte to 1.
+        byte nodeType = buf.get();
+//        System.out.println(nodeType);
+        assert(nodeType == (byte) 1);
+
+        // AbstractBuffer::getLong()
+        // Read toBytes() comment - after first isLeaf byte is 8 byte pageId of the next node
+        Long right = buf.getLong();
+        if (right.equals(-1L)) right = null;
+
+        Optional<Long> rightSibling = Optional.ofNullable(right);
+
+        List<DataBox> keys = new ArrayList<>();
+        List<RecordId> rids = new ArrayList<>();
+        int n = buf.getInt();
+
+        // Deserialize from toBytes() for loop at the end
+        for (int i = 0; i < n; ++i) {
+            keys.add(DataBox.fromBytes(buf, metadata.getKeySchema()));
+            rids.add(RecordId.fromBytes(buf));
+        }
+
+        return new LeafNode(metadata, bufferManager, page,
+                keys, rids, rightSibling, treeContext);
     }
 
     // Builtins ////////////////////////////////////////////////////////////////
