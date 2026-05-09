@@ -149,25 +149,48 @@ class LeafNode extends BPlusNode {
     // See BPlusNode.get.
     @Override
     public LeafNode get(DataBox key) {
-        // TODO(proj2): implement
-
         return this;
     }
 
     // See BPlusNode.getLeftmostLeaf.
     @Override
     public LeafNode getLeftmostLeaf() {
-        // TODO(proj2): implement
-
         return this;
     }
 
     // See BPlusNode.put.
     @Override
     public Optional<Pair<DataBox, Long>> put(DataBox key, RecordId rid) {
-        // TODO(proj2): implement
+        int index = InnerNode.upperBound(key, keys);
+        if (index > 0 && keys.get(index - 1).equals(key))
+            throw new BPlusTreeException("duplicate keys");
 
-        return Optional.empty();
+        if (index < keys.size()) {
+            keys.add(index, key);
+            rids.add(index, rid);
+        }
+        else {
+            keys.add(key);
+            rids.add(rid);
+        }
+
+        int order = metadata.getOrder();
+        if (metadata.getOrder() * 2 + 1 > keys.size()) {
+            sync();
+            return Optional.empty();
+        }
+
+        LeafNode rightNode = new LeafNode(metadata, bufferManager,
+                keys.subList(order, keys.size()), rids.subList(order, rids.size()), rightSibling, treeContext);
+        rightNode.sync();
+
+        Long rightNodePageNum = rightNode.getPage().getPageNum();
+        this.keys = new ArrayList<>(keys.subList(0, order));
+        this.rids = new ArrayList<>(rids.subList(0, order));
+        this.rightSibling = Optional.of(rightNodePageNum);
+        sync();
+
+        return Optional.of(new Pair<DataBox, Long>(rightNode.getKeys().get(0), rightNodePageNum));
     }
 
     // See BPlusNode.bulkLoad.
@@ -377,10 +400,6 @@ class LeafNode extends BPlusNode {
      */
     public static LeafNode fromBytes(BPlusTreeMetadata metadata, BufferManager bufferManager,
                                      LockContext treeContext, long pageNum) {
-        // TODO(proj2): implement
-        // Note: LeafNode has two constructors. To implement fromBytes be sure to
-        // use the constructor that reuses an existing page instead of fetching a
-        // brand new one.
         Page page = bufferManager.fetchPage(treeContext, pageNum);
         Buffer buf = page.getBuffer();
 
@@ -388,7 +407,6 @@ class LeafNode extends BPlusNode {
         // Check the first byte to make sure this is a leaf node.
         // Read toBytes() comments - when a leaf node is constructed, it initializes the first byte to 1.
         byte nodeType = buf.get();
-//        System.out.println(nodeType);
         assert(nodeType == (byte) 1);
 
         // AbstractBuffer::getLong()

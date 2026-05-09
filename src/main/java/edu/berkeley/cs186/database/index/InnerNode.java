@@ -82,20 +82,7 @@ class InnerNode extends BPlusNode {
     public LeafNode get(DataBox key) {
         // TODO(proj2): implement
 
-        // BPlusNode::children has n+1 elements so this is not out of bounds
-        int l = 0, r = keys.size();
-
-        // find first l s.t. key < l
-        // i.e. upper_bound(keys.begin(), keys.end(), key);
-        while (r > l) {
-            int mid = l + (r - l) / 2;
-
-            // while keys[mid] <= key: increase mid
-            if (keys.get(mid).compareTo(key) <= 0) l = mid + 1;
-            else r = mid;
-        }
-
-        return getChild(l).get(key);
+        return getChild(upperBound(key, keys)).get(key);
     }
 
     // See BPlusNode.getLeftmostLeaf.
@@ -118,8 +105,41 @@ class InnerNode extends BPlusNode {
     @Override
     public Optional<Pair<DataBox, Long>> put(DataBox key, RecordId rid) {
         // TODO(proj2): implement
+        int index = upperBound(key, keys);
 
-        return Optional.empty();
+        // recursion here - top down
+        // child can be both LeafNode and InnerNode. go all the way until LeafNode
+        // then go up and splits and eventually come back to this node
+        Optional<Pair<DataBox, Long>> splitResult = getChild(index).put(key, rid);
+
+        if (!splitResult.isPresent()) return Optional.empty();
+
+        DataBox splitKey = splitResult.get().getFirst();
+        Long rightNodePageNum = splitResult.get().getSecond();
+
+        index = upperBound(splitKey, keys);
+        keys.add(index, splitKey);
+        children.add(index + 1, rightNodePageNum);
+
+        int order = metadata.getOrder();
+        if (children.size() <= 2 * order + 1) {
+            sync();
+            return Optional.empty();
+        }
+
+        DataBox pushUpKey = keys.get(order);
+
+        InnerNode rightNode = new InnerNode(metadata, bufferManager,
+                // order + 1 since split key is pushed up
+                keys.subList(order + 1, keys.size()), children.subList(order + 1, children.size()),
+                treeContext);
+        rightNode.sync();
+
+        this.keys = new ArrayList<>(keys.subList(0, order));
+        this.children = new ArrayList<>(children.subList(0, order + 1));
+        sync();
+
+        return Optional.of(new Pair<DataBox, Long>(pushUpKey, rightNode.getPage().getPageNum()));
     }
 
     // See BPlusNode.bulkLoad.
@@ -254,6 +274,26 @@ class InnerNode extends BPlusNode {
             }
         }
         return n;
+    }
+
+    /**
+     * Get index of first element in list ys that is strictly larger than x.
+     * If x is larger than every element, return ys.size() (one-past-the-end) instead.
+     */
+    static <T extends Comparable<T>> int upperBound(T x, List<T> ys) {
+        int l = 0, r = ys.size();
+
+        // find first l s.t. key < l
+        // i.e. upper_bound(keys.begin(), keys.end(), key);
+        while (r > l) {
+            int mid = l + (r - l) / 2;
+
+            // while keys[mid] <= key: increase mid
+            if (ys.get(mid).compareTo(x) <= 0) l = mid + 1;
+            else r = mid;
+        }
+
+        return l;
     }
 
     // Pretty Printing /////////////////////////////////////////////////////////
