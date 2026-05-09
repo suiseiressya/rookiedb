@@ -150,11 +150,9 @@ public class BPlusTree {
         LeafNode leaf = root.get(key);
         List<DataBox> keys = leaf.getKeys();
 
-        for (int i = 0; i < keys.size(); i++) {
-            if (key.compareTo(keys.get(i)) == 0) {
-                return Optional.of(leaf.getRids().get(i));
-            }
-        }
+        int index = InnerNode.upperBound(key, keys);
+        if (index > 0 && keys.get(index - 1).compareTo(key) == 0)
+            return Optional.of(leaf.getRids().get(index));
 
         return Optional.empty();
     }
