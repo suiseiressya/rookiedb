@@ -112,6 +112,7 @@ public class BPlusTree {
         this.lockContext = lockContext;
         this.metadata = metadata;
 
+        // If root already exist on disk, deserialize
         if (this.metadata.getRootPageNum() != DiskSpaceManager.INVALID_PAGE_NUM) {
             this.root = BPlusNode.fromBytes(this.metadata, bufferManager, lockContext,
                     this.metadata.getRootPageNum());
@@ -146,6 +147,14 @@ public class BPlusTree {
         LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
 
         // TODO(proj2): implement
+        LeafNode leaf = root.get(key);
+        List<DataBox> keys = leaf.getKeys();
+
+        for (int i = 0; i < keys.size(); i++) {
+            if (key.compareTo(keys.get(i)) == 0) {
+                return Optional.of(leaf.getRids().get(i));
+            }
+        }
 
         return Optional.empty();
     }
@@ -270,11 +279,11 @@ public class BPlusTree {
      * be filled up to full and split in half exactly like in put.
      *
      * This method should raise an exception if the tree is not empty at time
-     * of bulk loading. Bulk loading is used when creating a new Index, so think 
-     * about what an "empty" tree should look like. If data does not meet the 
-     * preconditions (contains duplicates or not in order), the resulting 
-     * behavior is undefined. Undefined behavior means you can handle these 
-     * cases however you want (or not at all) and you are not required to 
+     * of bulk loading. Bulk loading is used when creating a new Index, so think
+     * about what an "empty" tree should look like. If data does not meet the
+     * preconditions (contains duplicates or not in order), the resulting
+     * behavior is undefined. Undefined behavior means you can handle these
+     * cases however you want (or not at all) and you are not required to
      * write any explicit checks.
      *
      * The behavior of this method should be similar to that of InnerNode's

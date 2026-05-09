@@ -82,7 +82,20 @@ class InnerNode extends BPlusNode {
     public LeafNode get(DataBox key) {
         // TODO(proj2): implement
 
-        return null;
+        // BPlusNode::children has n+1 elements so this is not out of bounds
+        int l = 0, r = keys.size();
+
+        // find first l s.t. key < l
+        // i.e. upper_bound(keys.begin(), keys.end(), key);
+        while (r > l) {
+            int mid = l + (r - l) / 2;
+
+            // while keys[mid] <= key: increase mid
+            if (keys.get(mid).compareTo(key) <= 0) l = mid + 1;
+            else r = mid;
+        }
+
+        return getChild(l).get(key);
     }
 
     // See BPlusNode.getLeftmostLeaf.
