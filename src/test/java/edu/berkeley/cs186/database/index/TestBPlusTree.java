@@ -408,6 +408,49 @@ public class TestBPlusTree {
 
     @Test
     @Category(PublicTests.class)
+    public void testGet() {
+        BPlusTree tree = getBPlusTree(Type.intType(), 2);
+        tree.put(new IntDataBox(1), new RecordId(1, (short) 1));
+        assertEquals(Optional.empty(), tree.get(new IntDataBox(0)));
+        assertEquals(Optional.of(new RecordId(1, (short) 1)), tree.get(new IntDataBox(1)));
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testPutNoOverflow() {
+        int d = 3;
+        BPlusTree tree = getBPlusTree(Type.intType(), d);
+        for (int i = 0; i < 2 * d; i++) {
+            tree.put(new IntDataBox(i), new RecordId(i, (short) i));
+        }
+        for (int i = 0; i < 2 * d; i++) {
+            assertEquals(Optional.of(new RecordId(i, (short) i)), tree.get(new IntDataBox(i)));
+        }
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testPutOverflow() {
+        int d = 2;
+        BPlusTree tree = getBPlusTree(Type.intType(), d);
+        for (int i = 1; i <= 2 * d + 1; i++) {
+            tree.put(new IntDataBox(i), new RecordId(i, (short) i));
+        }
+        for (int i = 1; i <= 2 * d + 1; i++) {
+            assertEquals(Optional.of(new RecordId(i, (short) i)), tree.get(new IntDataBox(i)));
+        }
+    }
+
+    @Test(expected = BPlusTreeException.class)
+    @Category(PublicTests.class)
+    public void testDuplicatePut() {
+        BPlusTree tree = getBPlusTree(Type.intType(), 2);
+        tree.put(new IntDataBox(1), new RecordId(1, (short) 1));
+        tree.put(new IntDataBox(1), new RecordId(2, (short) 2));
+    }
+
+    @Test
+    @Category(PublicTests.class)
     public void testRandomPuts() {
         // This test will generate 1000 keys and for trees of degree 2, 3 and 4
         // will scramble the keys and attempt to insert them.

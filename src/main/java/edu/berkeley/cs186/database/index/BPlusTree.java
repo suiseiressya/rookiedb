@@ -152,7 +152,7 @@ public class BPlusTree {
 
         int index = InnerNode.upperBound(key, keys);
         if (index > 0 && keys.get(index - 1).compareTo(key) == 0)
-            return Optional.of(leaf.getRids().get(index));
+            return Optional.of(leaf.getRids().get(index - 1));
 
         return Optional.empty();
     }
