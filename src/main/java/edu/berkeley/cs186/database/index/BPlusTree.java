@@ -146,7 +146,6 @@ public class BPlusTree {
         // TODO(proj4_integration): Update the following line
         LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
 
-        // TODO(proj2): implement
         LeafNode leaf = root.get(key);
         List<DataBox> keys = leaf.getKeys();
 
@@ -208,9 +207,7 @@ public class BPlusTree {
         // TODO(proj4_integration): Update the following line
         LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
 
-        // TODO(proj2): Return a BPlusTreeIterator.
-
-        return Collections.emptyIterator();
+        return new BPlusTreeIterator();
     }
 
     /**
@@ -241,9 +238,12 @@ public class BPlusTree {
         // TODO(proj4_integration): Update the following line
         LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
 
-        // TODO(proj2): Return a BPlusTreeIterator.
+        LeafNode leaf = root.get(key);
+        int index = InnerNode.upperBound(key, leaf.getKeys());
 
-        return Collections.emptyIterator();
+        if (index > 0 && leaf.getKeys().get(index - 1).equals(key)) --index;
+
+        return new BPlusTreeIterator(leaf, index);
     }
 
     /**
@@ -321,7 +321,6 @@ public class BPlusTree {
         // TODO(proj4_integration): Update the following line
         LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
 
-        // TODO(proj2): implement
         root.remove(key);
     }
 
@@ -434,20 +433,43 @@ public class BPlusTree {
 
     // Iterator ////////////////////////////////////////////////////////////////
     private class BPlusTreeIterator implements Iterator<RecordId> {
-        // TODO(proj2): Add whatever fields and constructors you want here.
+        private Optional<LeafNode> leaf;
+        private int leafIndex;
+
+        public BPlusTreeIterator() {
+            leaf = Optional.of(root.getLeftmostLeaf());
+            leafIndex = 0;
+        }
+
+        public BPlusTreeIterator(LeafNode startLeaf, int startIndex) {
+            leaf = Optional.of(startLeaf);
+            leafIndex = startIndex;
+        }
 
         @Override
         public boolean hasNext() {
-            // TODO(proj2): implement
+            if (!leaf.isPresent()) return false;
 
-            return false;
+            // check if still within current leaf
+            if (leafIndex < leaf.get().getKeys().size()) return true;
+
+            // else check if exist next leaf
+            return leaf.get().getRightSibling().isPresent();
         }
 
         @Override
         public RecordId next() {
-            // TODO(proj2): implement
+            if (!leaf.isPresent()) throw new NoSuchElementException();
 
-            throw new NoSuchElementException();
+            RecordId current = leaf.get().getRids().get(leafIndex);
+
+            if (leafIndex + 1 < leaf.get().getKeys().size()) ++leafIndex;
+            else {
+                leaf = leaf.get().getRightSibling();
+                leafIndex = 0;
+            }
+
+            return current;
         }
     }
 }

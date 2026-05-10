@@ -205,8 +205,6 @@ class LeafNode extends BPlusNode {
     // See BPlusNode.remove.
     @Override
     public void remove(DataBox key) {
-        // TODO(proj2): implement
-
         int index = InnerNode.upperBound(key, keys);
         if (index > 0 && keys.get(index - 1).equals(key)) {
             keys.remove(index - 1);

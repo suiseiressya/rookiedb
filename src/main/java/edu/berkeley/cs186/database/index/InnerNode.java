@@ -80,8 +80,6 @@ class InnerNode extends BPlusNode {
     // See BPlusNode.get.
     @Override
     public LeafNode get(DataBox key) {
-        // TODO(proj2): implement
-
         return getChild(upperBound(key, keys)).get(key);
     }
 
@@ -89,7 +87,6 @@ class InnerNode extends BPlusNode {
     @Override
     public LeafNode getLeftmostLeaf() {
         assert(children.size() > 0);
-        // TODO(proj2): implement
 
         BPlusNode child = getChild(0);
 
@@ -104,7 +101,6 @@ class InnerNode extends BPlusNode {
     // See BPlusNode.put.
     @Override
     public Optional<Pair<DataBox, Long>> put(DataBox key, RecordId rid) {
-        // TODO(proj2): implement
         int index = upperBound(key, keys);
 
         // recursion here - top down
@@ -154,8 +150,6 @@ class InnerNode extends BPlusNode {
     // See BPlusNode.remove.
     @Override
     public void remove(DataBox key) {
-        // TODO(proj2): implement
-
         int index = InnerNode.upperBound(key, keys);
         getChild(index).remove(key);
         sync();
