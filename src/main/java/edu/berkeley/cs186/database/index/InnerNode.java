@@ -135,16 +135,46 @@ class InnerNode extends BPlusNode {
         this.children = new ArrayList<>(children.subList(0, order + 1));
         sync();
 
-        return Optional.of(new Pair<DataBox, Long>(pushUpKey, rightNode.getPage().getPageNum()));
+        return Optional.of(new Pair<>(pushUpKey, rightNode.getPage().getPageNum()));
     }
 
     // See BPlusNode.bulkLoad.
     @Override
     public Optional<Pair<DataBox, Long>> bulkLoad(Iterator<Pair<DataBox, RecordId>> data,
             float fillFactor) {
-        // TODO(proj2): implement
+        int order = metadata.getOrder();
 
-        return Optional.empty();
+        // loop until overflow
+        while (data.hasNext() && children.size() <= 2 * order + 1) {
+            // always add new elements to the right
+            Optional<Pair<DataBox, Long>> splitResult = getChild(children.size() - 1).bulkLoad(data, fillFactor);
+
+            if (splitResult.isPresent()) {
+                DataBox splitKey = splitResult.get().getFirst();
+                Long rightNodePageNum = splitResult.get().getSecond();
+
+                keys.add(splitKey);
+                children.add(rightNodePageNum);
+            }
+        }
+
+        if (children.size() <= 2 * order + 1) {
+            sync();
+            return Optional.empty();
+        }
+
+        DataBox pushUpKey = keys.get(order);
+        InnerNode rightNode = new InnerNode(metadata, bufferManager,
+                // order + 1 since split key is pushed up
+                keys.subList(order + 1, keys.size()), children.subList(order + 1, children.size()),
+                treeContext);
+        rightNode.sync();
+
+        this.keys = new ArrayList<>(keys.subList(0, order));
+        this.children = new ArrayList<>(children.subList(0, order + 1));
+        sync();
+
+        return Optional.of(new Pair<>(pushUpKey, rightNode.getPage().getPageNum()));
     }
 
     // See BPlusNode.remove.

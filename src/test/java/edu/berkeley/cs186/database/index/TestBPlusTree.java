@@ -149,6 +149,30 @@ public class TestBPlusTree {
 
     @Test
     @Category(PublicTests.class)
+    public void testOddFillFactor() {
+        BPlusTree tree = getBPlusTree(Type.intType(), 2);
+        float fillFactor = (float) (1.0 / Math.PI);
+        assertEquals("()", tree.toSexp());
+
+        List<Pair<DataBox, RecordId>> data = new ArrayList<>();
+        for (int i = 1; i <= 7; ++i) {
+            data.add(new Pair<>(new IntDataBox(i), new RecordId(i, (short) i)));
+        }
+
+        tree.bulkLoad(data.iterator(), fillFactor);
+        //   (  3     5     7  )
+        //  /      |     |     \
+        // (1 2) (3 4) (5 6)  (7)
+        String leaf0 = "((1 (1 1)) (2 (2 2)))";
+        String leaf1 = "((3 (3 3)) (4 (4 4)))";
+        String leaf2 = "((5 (5 5)) (6 (6 6)))";
+        String leaf3 = "((7 (7 7)))";
+        String sexp = String.format("(%s 3 %s 5 %s 7 %s)", leaf0, leaf1, leaf2, leaf3);
+        assertEquals(sexp, tree.toSexp());
+    }
+
+    @Test
+    @Category(PublicTests.class)
     public void testWhiteBoxTest() {
         // This test will insert values one by one into your B+ tree implementation.
         // We've provided a visualization of how your tree should be structured

@@ -190,16 +190,41 @@ class LeafNode extends BPlusNode {
         this.rightSibling = Optional.of(rightNodePageNum);
         sync();
 
-        return Optional.of(new Pair<DataBox, Long>(rightNode.getKeys().get(0), rightNodePageNum));
+        return Optional.of(new Pair<>(rightNode.getKeys().get(0), rightNodePageNum));
     }
 
     // See BPlusNode.bulkLoad.
     @Override
     public Optional<Pair<DataBox, Long>> bulkLoad(Iterator<Pair<DataBox, RecordId>> data,
             float fillFactor) {
-        // TODO(proj2): implement
+        int threshold = (int) Math.ceil(metadata.getOrder() * 2.0 * fillFactor);
 
-        return Optional.empty();
+        // loop until overflow
+        while (data.hasNext() && keys.size() <= threshold) {
+            Pair<DataBox, RecordId> cur = data.next();
+            keys.add(cur.getFirst());
+            rids.add(cur.getSecond());
+        }
+
+        // no overflow
+        if (keys.size() <= threshold) {
+            sync();
+            return Optional.empty();
+        }
+
+        LeafNode rightNode = new LeafNode(metadata, bufferManager,
+                keys.subList(threshold, keys.size()),
+                rids.subList(threshold, rids.size()),
+                rightSibling, treeContext);
+        rightNode.sync();
+
+        Long rightNodePageNum = rightNode.getPage().getPageNum();
+        this.keys = new ArrayList<>(keys.subList(0, threshold));
+        this.rids = new ArrayList<>(rids.subList(0, threshold));
+        this.rightSibling = Optional.of(rightNodePageNum);
+        sync();
+
+        return Optional.of(new Pair<>(rightNode.getKeys().get(0), rightNodePageNum));
     }
 
     // See BPlusNode.remove.
