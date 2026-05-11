@@ -297,6 +297,10 @@ public class BPlusTree {
         // TODO(proj4_integration): Update the following line
         LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
 
+        if (!(root instanceof LeafNode) || !((LeafNode) root).getKeys().isEmpty()) {
+            throw new BPlusTreeException("bulkLoad requires an empty tree");
+        }
+
         while (data.hasNext()) {
             Optional<Pair<DataBox, Long>> splitResult = root.bulkLoad(data, fillFactor);
             if (!splitResult.isPresent()) return;

@@ -173,6 +173,84 @@ public class TestBPlusTree {
 
     @Test
     @Category(PublicTests.class)
+    public void testBulkLoadWithSplit() {
+        BPlusTree tree = getBPlusTree(Type.intType(), 1);
+        float fillFactor = 1.0f;
+
+        List<Pair<DataBox, RecordId>> data = new ArrayList<>();
+        for (int i = 1; i <= 7; ++i) {
+            data.add(new Pair<>(new IntDataBox(i), new RecordId(i, (short) i)));
+        }
+
+        tree.bulkLoad(data.iterator(), fillFactor);
+        //         (5)
+        //        /   \
+        //     (3)     (7)
+        //    /   \   /   \
+        // (1 2) (3 4) (5 6) (7)
+        String ll = "((1 (1 1)) (2 (2 2)))";
+        String lr = "((3 (3 3)) (4 (4 4)))";
+        String rl = "((5 (5 5)) (6 (6 6)))";
+        String rr = "((7 (7 7)))";
+        String l = String.format("(%s 3 %s)", ll, lr);
+        String r = String.format("(%s 7 %s)", rl, rr);
+        assertEquals(String.format("(%s 5 %s)", l, r), tree.toSexp());
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testBulkLoadScanAll() {
+        BPlusTree tree = getBPlusTree(Type.intType(), 2);
+        float fillFactor = 0.75f;
+
+        List<Pair<DataBox, RecordId>> data = new ArrayList<>();
+        List<RecordId> expected = new ArrayList<>();
+        for (int i = 1; i <= 10; ++i) {
+            data.add(new Pair<>(new IntDataBox(i), new RecordId(i, (short) i)));
+            expected.add(new RecordId(i, (short) i));
+        }
+
+        tree.bulkLoad(data.iterator(), fillFactor);
+        assertEquals(expected, indexIteratorToList(tree::scanAll));
+    }
+
+    @Test(expected = BPlusTreeException.class)
+    @Category(PublicTests.class)
+    public void testBulkLoadNonEmpty() {
+        // throw errors since tree is nonempty
+        BPlusTree tree = getBPlusTree(Type.intType(), 2);
+        tree.put(new IntDataBox(1), new RecordId(1, (short) 1));
+
+        List<Pair<DataBox, RecordId>> data = new ArrayList<>();
+        data.add(new Pair<>(new IntDataBox(2), new RecordId(2, (short) 2)));
+        tree.bulkLoad(data.iterator(), 0.75f);
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testBulkLoadFullLeaves() {
+        // fillFactor=1.0 → threshold=ceil(2d*1.0)=4 (fully packed leaves).
+        // Verifies leaves are allowed to reach max capacity (2d) before splitting.
+        BPlusTree tree = getBPlusTree(Type.intType(), 2);
+        float fillFactor = 1.0f;
+
+        List<Pair<DataBox, RecordId>> data = new ArrayList<>();
+        for (int i = 1; i <= 9; ++i) {
+            data.add(new Pair<>(new IntDataBox(i), new RecordId(i, (short) i)));
+        }
+
+        tree.bulkLoad(data.iterator(), fillFactor);
+        //      (    5         9   )
+        //      /         |        \
+        // (1 2 3 4) (5 6 7 8)    (9)
+        String leaf0 = "((1 (1 1)) (2 (2 2)) (3 (3 3)) (4 (4 4)))";
+        String leaf1 = "((5 (5 5)) (6 (6 6)) (7 (7 7)) (8 (8 8)))";
+        String leaf2 = "((9 (9 9)))";
+        assertEquals(String.format("(%s 5 %s 9 %s)", leaf0, leaf1, leaf2), tree.toSexp());
+    }
+
+    @Test
+    @Category(PublicTests.class)
     public void testWhiteBoxTest() {
         // This test will insert values one by one into your B+ tree implementation.
         // We've provided a visualization of how your tree should be structured
