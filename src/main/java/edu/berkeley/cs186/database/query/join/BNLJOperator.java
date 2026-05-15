@@ -88,6 +88,16 @@ public class BNLJOperator extends JoinOperator {
          */
         private void fetchNextLeftBlock() {
             // TODO(proj3_part1): implement
+            if (!leftSourceIterator.hasNext()) return;
+
+            // iterator through an actual block (array)
+            // get block of B - 2 pages at a time
+
+            // getBlockIterator initializes to **before-the-start** index
+            // so markNext() marks the **first** record in the chunk
+            leftBlockIterator = getBlockIterator(leftSourceIterator, getLeftSource().getSchema(), numBuffers - 2);
+            leftBlockIterator.markNext();
+            leftRecord = leftBlockIterator.next();
         }
 
         /**
@@ -103,6 +113,11 @@ public class BNLJOperator extends JoinOperator {
          */
         private void fetchNextRightPage() {
             // TODO(proj3_part1): implement
+            if (!rightSourceIterator.hasNext()) return;
+
+            // get "block" of 1 page
+            rightPageIterator = getBlockIterator(rightSourceIterator, getRightSource().getSchema(), 1);
+            rightPageIterator.markNext();
         }
 
         /**
@@ -115,7 +130,43 @@ public class BNLJOperator extends JoinOperator {
          */
         private Record fetchNextRecord() {
             // TODO(proj3_part1): implement
-            return null;
+            if (leftRecord == null) return null;
+
+            /**
+             * for (chunk of R)
+             *      for (page of S)
+             *          for (tuple in R)
+             *              for (tuple in S)
+             *                  compare
+             */
+
+            // work from inside out
+            while (true) {
+                if (this.rightPageIterator.hasNext()) {
+                    Record rightRecord = rightPageIterator.next();
+
+                    if (compare(leftRecord, rightRecord) == 0) {
+                        return leftRecord.concat(rightRecord);
+                    }
+                }
+                else if (leftBlockIterator.hasNext()) {
+                    leftRecord = leftBlockIterator.next();
+                    rightPageIterator.reset();
+                }
+                else if (rightSourceIterator.hasNext()) {
+                    fetchNextRightPage();
+                    leftBlockIterator.reset();
+                    leftRecord = leftBlockIterator.next();
+                }
+                else if (leftSourceIterator.hasNext()){
+                    fetchNextLeftBlock();
+                    rightSourceIterator.reset();
+                    fetchNextRightPage();
+                }
+                else {
+                    return null;
+                }
+            }
         }
 
         /**
