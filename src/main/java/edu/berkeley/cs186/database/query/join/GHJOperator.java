@@ -247,9 +247,6 @@ public class GHJOperator extends JoinOperator {
         ArrayList<Record> leftRecords = new ArrayList<>();
         ArrayList<Record> rightRecords = new ArrayList<>();
 
-        // TODO(proj3_part1): populate leftRecords and rightRecords such that
-        // SHJ breaks when trying to join them but not GHJ
-
         // SHJ requirement: [R] < B
         // GHJ requirement: [R] < B^2
         // In this case B = 6, each page can hold 8. so max record for SHJ is 48 and GHJ is 48^2
@@ -277,7 +274,6 @@ public class GHJOperator extends JoinOperator {
     public static Pair<List<Record>, List<Record>> getBreakGHJInputs() {
         ArrayList<Record> leftRecords = new ArrayList<>();
         ArrayList<Record> rightRecords = new ArrayList<>();
-        // TODO(proj3_part1): populate leftRecords and rightRecords such that GHJ breaks
 
         // break when hit max level of passes
         // next pass when each record arrays have > (numBuffers - 2) * (entriesPerPage)
