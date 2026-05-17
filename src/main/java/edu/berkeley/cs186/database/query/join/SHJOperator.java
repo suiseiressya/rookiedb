@@ -97,7 +97,8 @@ public class SHJOperator extends JoinOperator {
         // left records that hash to the same key
         Map<DataBox, List<Record>> hashTable = new HashMap<>();
 
-        // Building stage
+        // Building stage: load all R into hash table
+        // requires R to fit entirely in memory
         for (Record leftRecord: partition) {
             DataBox leftJoinValue = leftRecord.getValue(this.getLeftColumnIndex());
             if (!hashTable.containsKey(leftJoinValue)) {
@@ -107,6 +108,7 @@ public class SHJOperator extends JoinOperator {
         }
 
         // Probing stage
+        // Scan S and probe R
         for (Record rightRecord: rightRecords) {
             DataBox rightJoinValue = rightRecord.getValue(getRightColumnIndex());
             if (!hashTable.containsKey(rightJoinValue)) continue;

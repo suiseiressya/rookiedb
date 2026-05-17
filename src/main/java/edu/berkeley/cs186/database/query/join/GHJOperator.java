@@ -67,11 +67,24 @@ public class GHJOperator extends JoinOperator {
      * @param pass the current pass (used to pick a hash function)
      */
     private void partition(Partition[] partitions, Iterable<Record> records, boolean left, int pass) {
-        // TODO(proj3_part1): implement the partitioning logic
         // You may find the implementation in SHJOperator.java to be a good
         // starting point. You can use the static method HashFunc.hashDataBox
         // to get a hash value.
-        return;
+        for (Record record: records) {
+            DataBox columnValue;
+
+            // getLeftColumnIndex(): get the index of the left column
+            // of this specific join operation
+            // same for getRightColumnIndex()
+            if (left) columnValue = record.getValue(this.getLeftColumnIndex());
+            else columnValue = record.getValue(this.getRightColumnIndex());
+
+            int hash = HashFunc.hashDataBox(columnValue, pass);
+            int partitionNum = hash % partitions.length;
+            if (partitionNum < 0) partitionNum += partitions.length;
+
+            partitions[partitionNum].add(record);
+        }
     }
 
     /**
@@ -90,6 +103,8 @@ public class GHJOperator extends JoinOperator {
         // The index of the join column for the probe records
         int probeColumnIndex;
 
+        // Classify left/right partition into build partition and probe partition
+        // by size
         if (leftPartition.getNumPages() <= this.numBuffers - 2) {
             buildRecords = leftPartition;
             buildColumnIndex = getLeftColumnIndex();
@@ -108,10 +123,34 @@ public class GHJOperator extends JoinOperator {
                 "fit in B-2 pages of memory."
             );
         }
-        // TODO(proj3_part1): implement the building and probing stage
+
         // You shouldn't refer to any variable starting with "left" or "right"
         // here, use the "build" and "probe" variables we set up for you.
         // Check out how SHJOperator implements this function if you feel stuck.
+
+        Map<DataBox, List<Record>> hashTable = new HashMap<>();
+
+        for (Record record: buildRecords) {
+            DataBox joinValue = record.getValue(buildColumnIndex);
+            if (!hashTable.containsKey(joinValue)) {
+                hashTable.put(joinValue, new ArrayList<>());
+            }
+            hashTable.get(joinValue).add(record);
+        }
+
+        // Probing stage
+        // Scan S and probe R
+        for (Record record: probeRecords) {
+            DataBox joinValue = record.getValue(probeColumnIndex);
+            if (!hashTable.containsKey(joinValue)) continue;
+            // We have to join the right record with each left record with
+            // a matching key
+            for (Record bRecord : hashTable.get(joinValue)) {
+                Record joinedRecord = bRecord.concat(record);
+                // Accumulate joined records in this.joinedRecords
+                this.joinedRecords.add(joinedRecord);
+            }
+        }
     }
 
     /**
@@ -129,13 +168,20 @@ public class GHJOperator extends JoinOperator {
         Partition[] rightPartitions = createPartitions(false);
 
         // Partition records into left and right
+        // Each partition are based on hash table, are NOT pages.
+        // think of it like a block of memory that can span multiple pages
         this.partition(leftPartitions, leftRecords, true, pass);
         this.partition(rightPartitions, rightRecords, false, pass);
 
         for (int i = 0; i < leftPartitions.length; i++) {
-            // TODO(proj3_part1): implement the rest of grace hash join
             // If you meet the conditions to run the build and probe you should
             // do so immediately. Otherwise you should make a recursive call.
+
+            int minPages = Math.min(leftPartitions[i].getNumPages(), rightPartitions[i].getNumPages());
+            if (minPages <= numBuffers - 2)
+                buildAndProbe(leftPartitions[i], rightPartitions[i]);
+            else
+                run(leftPartitions[i], rightPartitions[i], pass + 1);
         }
     }
 
