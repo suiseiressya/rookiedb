@@ -249,6 +249,15 @@ public class GHJOperator extends JoinOperator {
 
         // TODO(proj3_part1): populate leftRecords and rightRecords such that
         // SHJ breaks when trying to join them but not GHJ
+
+        // SHJ requirement: [R] < B
+        // GHJ requirement: [R] < B^2
+        // In this case B = 6, each page can hold 8. so max record for SHJ is 48 and GHJ is 48^2
+        for (int i = 0; i < 48 * 48; i++) {
+            leftRecords.add(createRecord(i));
+            rightRecords.add(createRecord(i));
+        }
+
         return new Pair<>(leftRecords, rightRecords);
     }
 
@@ -269,6 +278,17 @@ public class GHJOperator extends JoinOperator {
         ArrayList<Record> leftRecords = new ArrayList<>();
         ArrayList<Record> rightRecords = new ArrayList<>();
         // TODO(proj3_part1): populate leftRecords and rightRecords such that GHJ breaks
+
+        // break when hit max level of passes
+        // next pass when each record arrays have > (numBuffers - 2) * (entriesPerPage)
+        // 4 * 8 = 32 entries
+        // if we make all records equal and size > 32 then the self-partitioning will do nothing
+        // and will hit max number of passes (in fact it will recur infinitely)
+        for (int i = 0; i < 33; i++) {
+            leftRecords.add(createRecord(1));
+            rightRecords.add(createRecord(1));
+        }
+
 
         return new Pair<>(leftRecords, rightRecords);
     }
