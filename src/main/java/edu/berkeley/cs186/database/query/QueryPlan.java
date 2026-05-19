@@ -568,16 +568,55 @@ public class QueryPlan {
      * the search algorithm to determine the most efficient way to access each
      * table.
      *
+     * "Pushing down" selects means wrapping the base operator in SelectOperator
+     * layers for any remaining WHERE predicates on this table (except the optimal one,
+     * since it is reserved its own operator). These operators form a pipeline: records
+     * flow up one at a time, filtered before reaching any join above.
+     * This matters because joins are expensive — the fewer rows the join sees,
+     * the cheaper it is. For example:
+     *
+     *   // Bad: filter after join
+     *   SelectOperator(age > 25)
+     *       └── JoinOperator(Sailors ⋈ Reserves)
+     *
+     *   // Good: filter pushed down before join
+     *   JoinOperator
+     *       └── SelectOperator(age > 25)
+     *               └── IndexScanOperator(rating = 8)
+     *
+     * Only one index is ever used as the base scan (the cheapest one). All other
+     * predicates — including other index-eligible ones and all NOT_EQUALS predicates
+     * — become SelectOperator layers on top.
+     *
      * @return a QueryOperator that has the lowest cost of scanning the given
      * table which is either a SequentialScanOperator or an IndexScanOperator
      * nested within any possible pushed down select operators. Ties for the
      * minimum cost operator can be broken arbitrarily.
      */
     public QueryOperator minCostSingleAccess(String table) {
-        QueryOperator minOp = new SequentialScanOperator(this.transaction, table);
+        QueryOperator bestOperator = new SequentialScanOperator(this.transaction, table);
+        int minimumCost = bestOperator.estimateIOCost();
+        int bestExceptIndex = -1;
 
-        // TODO(proj3_part2): implement
-        return minOp;
+        List<Integer> eligibleIndexes = getEligibleIndexColumns(table);
+
+        for (Integer index: eligibleIndexes) {
+            SelectPredicate pred = selectPredicates.get(index);
+            IndexScanOperator indexScan = new IndexScanOperator(this.transaction,
+                    table, pred.column, pred.operator, pred.value);
+
+            int cost = indexScan.estimateIOCost();
+            if (minimumCost > cost) {
+                minimumCost = cost;
+                bestOperator = indexScan;
+                bestExceptIndex = index;
+            }
+        }
+
+        // push down all predicates to wrap in a select operator
+        // if there is a index scan chosen above, pass bestExceptIndex to skip it
+        // (will be just -1 if skip nothing)
+        return addEligibleSelections(bestOperator, bestExceptIndex);
     }
 
     // Task 6: Join Selection //////////////////////////////////////////////////
