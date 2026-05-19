@@ -1,5 +1,7 @@
 # Proj2: B+ Tree Index
 
+**Assignment spec:** [your-tasks.md](original-docs/your-tasks.md)
+
 ## Overview
 
 A B+ tree is a balanced tree where inner nodes act as a routing layer (keys only) and leaf nodes store the actual data ((key, RecordId) pairs). All leaves are linked in a sorted singly-linked list, enabling efficient range scans without revisiting the tree. This gives O(log N) point lookups and O(log N + K) range scans for K results.
