@@ -685,6 +685,49 @@ public class QueryPlan {
         //      calculate the cheapest join with the new table (the one you
         //      fetched an operator for from pass1Map) and the previously joined
         //      tables. Then, update the result map if needed.
+
+        for (Map.Entry<Set<String>, QueryOperator> entry: prevMap.entrySet()) {
+            for (JoinPredicate joinPred: this.joinPredicates) {
+                String leftTable = joinPred.leftTable;
+                String leftColumn = joinPred.leftColumn;
+                String rightTable = joinPred.rightTable;
+                String rightColumn = joinPred.rightColumn;
+
+                QueryOperator bestOp = null;
+
+                // if contains leftTable in previous joins but not rightTable
+                // then calc minCostJoinType of current bestOp, minCostSingleAccess(rightTable),
+                // leftColumn (since leftColumn already in current set), and rightColumn
+                if (entry.getKey().contains(leftTable)) {
+                    if (!entry.getKey().contains(rightTable)) {
+                        bestOp = minCostJoinType(
+                                entry.getValue(), minCostSingleAccess(rightTable), leftColumn, rightColumn
+                        );
+                    }
+                }
+                // vice versa if rightColumn inside set but not leftColumn
+                else if (entry.getKey().contains(rightTable)) {
+                    bestOp = minCostJoinType(
+                            entry.getValue(), minCostSingleAccess(leftTable), rightColumn, leftColumn
+                    );
+                }
+
+                if (bestOp == null) continue;
+
+                Set<String> tables = new HashSet<>(entry.getKey());
+                tables.add(
+                        (entry.getKey().contains(leftTable)) ? rightTable : leftTable
+                );
+
+                if (!result.containsKey(tables)) result.put(tables, bestOp);
+                else {
+                    QueryOperator currentOp = result.get(tables);
+                    if (bestOp.estimateIOCost() < currentOp.estimateIOCost())
+                        result.put(tables, bestOp);
+                }
+            }
+        }
+
         return result;
     }
 
