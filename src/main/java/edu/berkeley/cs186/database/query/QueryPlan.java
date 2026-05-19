@@ -669,7 +669,6 @@ public class QueryPlan {
             Map<Set<String>, QueryOperator> prevMap,
             Map<Set<String>, QueryOperator> pass1Map) {
         Map<Set<String>, QueryOperator> result = new HashMap<>();
-        // TODO(proj3_part2): implement
         // We provide a basic description of the logic you have to implement:
         // For each set of tables in prevMap
         //   For each join predicate listed in this.joinPredicates
@@ -765,7 +764,6 @@ public class QueryPlan {
      */
     public Iterator<Record> execute() {
         this.transaction.setAliasMap(this.aliases);
-        // TODO(proj3_part2): implement
         // Pass 1: For each table, find the lowest cost QueryOperator to access
         // the table. Construct a mapping of each table name to its lowest cost
         // operator.
@@ -777,7 +775,33 @@ public class QueryPlan {
         // Set the final operator to the lowest cost operator from the last
         // pass, add group by, project, sort and limit operators, and return an
         // iterator over the final operator.
-        return this.executeNaive(); // TODO(proj3_part2): Replace this!
+
+        // Pass 1
+        Map<Set<String>, QueryOperator> pass1Map = new HashMap<>();
+        for (String table: this.tableNames) {
+            QueryOperator bestOp = minCostSingleAccess(table);
+            Set<String> tables = new HashSet<>();
+            tables.add(table);
+            pass1Map.put(tables, bestOp);
+        }
+
+        // Pass i
+        Map<Set<String>, QueryOperator> prevMap = new HashMap<>(pass1Map);
+        // when finished joining, prevMap will only have size 1
+        // since all table are joined
+        while (prevMap.size() > 1) {
+            prevMap = minCostJoins(prevMap, pass1Map);
+        }
+
+        // access by using iterator
+        Map.Entry<Set<String>, QueryOperator> entry = prevMap.entrySet().iterator().next();
+        this.finalOperator = entry.getValue();
+        this.addGroupBy();
+        this.addProject();
+        this.addSort();
+        this.addLimit();
+
+        return this.finalOperator.iterator();
     }
 
     // EXECUTE NAIVE ///////////////////////////////////////////////////////////
