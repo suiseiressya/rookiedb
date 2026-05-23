@@ -227,8 +227,45 @@ public class LockManager {
         // all your code within the given synchronized block and are allowed to
         // move the synchronized block elsewhere if you wish.
         boolean shouldBlock = false;
+
+        // acquire
         synchronized (this) {
-            
+            ResourceEntry entry = getResourceEntry(name);
+            long txNum = transaction.getTransNum();
+
+            // potentially duplicated lock
+            // will throw if entry not in list of released locks
+            boolean potentialDuplicate = entry.getTransactionLockType(txNum) != LockType.NL;
+
+            for (ResourceName rName: releaseNames) {
+                ResourceEntry rEntry = getResourceEntry(rName);
+                if (rEntry.getTransactionLockType(txNum) == LockType.NL)
+                    throw new NoLockHeldException("cannot release: lock not held");
+
+                if (rEntry.equals(entry)) potentialDuplicate = false;
+            }
+
+            if (potentialDuplicate) throw new DuplicateLockRequestException("duplicate acquire: lock already acquired");
+
+            Lock lock = new Lock(name, lockType, txNum);
+            if (!entry.checkCompatible(lockType, txNum)) {
+                shouldBlock = true;
+                transaction.prepareBlock();
+                entry.addToQueue(new LockRequest(transaction, lock), true);
+            }
+            else {
+                // acquire
+                entry.grantOrUpdateLock(lock);
+                transactionLocks.putIfAbsent(txNum, new ArrayList<>());
+                transactionLocks.get(txNum).add(lock);
+
+                // release
+                for (ResourceName rName: releaseNames) {
+                    // avoid releasing recently updated lock
+                    if (!rName.equals(name)) release(transaction, rName);
+                }
+            }
+
         }
         if (shouldBlock) {
             transaction.block();
@@ -262,7 +299,7 @@ public class LockManager {
             // if not NL, means there is already a lock
             // and throw error
             if (entry.getTransactionLockType(txNum) != LockType.NL)
-                throw new DuplicateLockRequestException("abc");
+                throw new DuplicateLockRequestException("duplicate acquire: lock already acquired");
 
             Lock lock = new Lock(name, lockType, txNum);
             if (!entry.checkCompatible(lockType, txNum) || !entry.waitingQueue.isEmpty()) {
@@ -300,7 +337,7 @@ public class LockManager {
 
             transactionLocks.putIfAbsent(txNum, Collections.emptyList());
             if (entry.getTransactionLockType(txNum) == LockType.NL)
-                throw new NoLockHeldException("abc");
+                throw new NoLockHeldException("cannot release: lock not held");
 
             Lock lock = entry.getTransactionLock(txNum);
             entry.releaseLock(lock);
@@ -337,7 +374,30 @@ public class LockManager {
         // You may modify any part of this method.
         boolean shouldBlock = false;
         synchronized (this) {
-            
+            ResourceEntry entry = getResourceEntry(name);
+            long txNum = transaction.getTransNum();
+
+            LockType currentLockType = entry.getTransactionLockType(txNum);
+
+            if (currentLockType == newLockType)
+                throw new DuplicateLockRequestException("duplicate promotion");
+            else if (currentLockType == LockType.NL)
+                throw new NoLockHeldException("cannot promote: lock not yet held");
+
+            Lock lock = new Lock(name, newLockType, txNum);
+            if (!LockType.substitutable(newLockType, currentLockType))
+                throw new InvalidLockException("cannot promote: invalid lock type");
+
+            if (!entry.checkCompatible(newLockType, txNum)) {
+                shouldBlock = true;
+                transaction.prepareBlock();
+                entry.addToQueue(new LockRequest(transaction, lock), true);
+            }
+            else {
+                entry.grantOrUpdateLock(lock);
+                transactionLocks.putIfAbsent(txNum, new ArrayList<>());
+                transactionLocks.get(txNum).add(lock);
+            }
         }
         if (shouldBlock) {
             transaction.block();
