@@ -394,8 +394,9 @@ public class LockManager {
                 entry.addToQueue(new LockRequest(transaction, lock), true);
             }
             else {
+                Lock oldLock = entry.getTransactionLock(txNum);
                 entry.grantOrUpdateLock(lock);
-                transactionLocks.putIfAbsent(txNum, new ArrayList<>());
+                transactionLocks.get(txNum).remove(oldLock);
                 transactionLocks.get(txNum).add(lock);
             }
         }

@@ -230,6 +230,10 @@ public enum LockType {
         return this == LockType.IX || this == LockType.IS || this == LockType.SIX;
     }
 
+    public boolean isExclusive() {
+        return this == LockType.X || this == LockType.IX || this == LockType.SIX;
+    }
+
     @Override
     public String toString() {
         switch (this) {
