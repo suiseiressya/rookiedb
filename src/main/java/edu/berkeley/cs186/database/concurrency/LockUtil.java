@@ -37,7 +37,7 @@ public class LockUtil {
         if (transaction == null || lockContext == null) return;
 
         // You may find these variables useful
-        LockContext parentContext = lockContext.parentContext();
+        LockContext parentContext = lockContext.getParentContext();
         LockType effectiveLockType = lockContext.getEffectiveLockType(transaction);
         LockType explicitLockType = lockContext.getExplicitLockType(transaction);
 

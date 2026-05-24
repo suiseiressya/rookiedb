@@ -7,6 +7,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
  * LockContext wraps around LockManager to provide the hierarchical structure
@@ -97,7 +98,23 @@ public class LockContext {
             throws InvalidLockException, DuplicateLockRequestException {
         // TODO(proj4_part2): implement
 
-        return;
+        if (readonly) throw new UnsupportedOperationException("readonly");
+        if (lockType == LockType.NL)
+            throw new InvalidLockException("cannot release NL");
+
+        if (parent != null) {
+            LockType parentLockType = parent.getExplicitLockType(transaction);
+            if (!LockType.canBeParentLock(parentLockType, lockType))
+                throw new InvalidLockException("invalid parent lock");
+        }
+
+        lockman.acquire(transaction, name, lockType);
+
+        if (parent != null) {
+            long txNum = transaction.getTransNum();
+            parent.numChildLocks.putIfAbsent(txNum, 0);
+            parent.numChildLocks.put(txNum, parent.numChildLocks.get(txNum) + 1);
+        }
     }
 
     /**
@@ -114,8 +131,19 @@ public class LockContext {
     public void release(TransactionContext transaction)
             throws NoLockHeldException, InvalidLockException {
         // TODO(proj4_part2): implement
+        if (readonly) throw new UnsupportedOperationException("readonly");
 
-        return;
+        if (getNumChildren(transaction) > 0)
+            throw new InvalidLockException("cannot release: children lock below");
+
+        lockman.release(transaction, name);
+
+        // call release() bottom up from children
+        // so parent.numChildren will get updated each time
+        if (parent != null) {
+            long txNum = transaction.getTransNum();
+            parent.numChildLocks.put(txNum, parent.numChildLocks.get(txNum) - 1);
+        }
     }
 
     /**
@@ -178,7 +206,7 @@ public class LockContext {
      * @throws UnsupportedOperationException if context is readonly
      */
     public void escalate(TransactionContext transaction) throws NoLockHeldException {
-        // TODO(proj4_part2): implement
+        // TODO(proj4_part2):` implement
 
         return;
     }
@@ -190,7 +218,7 @@ public class LockContext {
     public LockType getExplicitLockType(TransactionContext transaction) {
         if (transaction == null) return LockType.NL;
         // TODO(proj4_part2): implement
-        return LockType.NL;
+        return lockman.getLockType(transaction, name);
     }
 
     /**
@@ -202,6 +230,17 @@ public class LockContext {
     public LockType getEffectiveLockType(TransactionContext transaction) {
         if (transaction == null) return LockType.NL;
         // TODO(proj4_part2): implement
+        LockContext ctx = this;
+        LockType lockType;
+
+        while (ctx != null) {
+            lockType = ctx.getExplicitLockType(transaction);
+            if (lockType == LockType.S || lockType == LockType.X) return lockType;
+            if (lockType == LockType.SIX) return LockType.S;
+
+            ctx = ctx.getParentContext();
+        }
+
         return LockType.NL;
     }
 
@@ -213,7 +252,31 @@ public class LockContext {
      */
     private boolean hasSIXAncestor(TransactionContext transaction) {
         // TODO(proj4_part2): implement
+        LockContext ctx = parent;
+        LockType lockType;
+
+        while (ctx != null) {
+            lockType = ctx.getExplicitLockType(transaction);
+            if (lockType == LockType.SIX) return true;
+
+            ctx = ctx.getParentContext();
+        }
+
         return false;
+    }
+
+    private LockType getIntentAncestor(TransactionContext transaction) {
+        LockContext ctx = this;
+        LockType lockType;
+
+        while (ctx != null) {
+            lockType = ctx.getExplicitLockType(transaction);
+            if (lockType == LockType.SIX || lockType == LockType.IS || lockType == LockType.IX) return lockType;
+
+            ctx = ctx.getParentContext();
+        }
+
+        return LockType.NL;
     }
 
     /**
@@ -243,7 +306,7 @@ public class LockContext {
     /**
      * Gets the parent context.
      */
-    public LockContext parentContext() {
+    public LockContext getParentContext() {
         return parent;
     }
 
