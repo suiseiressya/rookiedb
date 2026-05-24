@@ -722,6 +722,298 @@ public class TestLockManager {
 
     @Test
     @Category(PublicTests.class)
+    public void testMultipleSharedLocksCompatible() {
+        // Two transactions can hold S simultaneously
+        DeterministicRunner runner = new DeterministicRunner(2);
+        runner.run(0, () -> lockman.acquire(transactions[0], dbResource, LockType.S));
+        runner.run(1, () -> lockman.acquire(transactions[1], dbResource, LockType.S));
+
+        assertTrue(holds(lockman, transactions[0], dbResource, LockType.S));
+        assertTrue(holds(lockman, transactions[1], dbResource, LockType.S));
+        assertFalse(transactions[0].getBlocked());
+        assertFalse(transactions[1].getBlocked());
+
+        List<Lock> expected = Arrays.asList(
+            new Lock(dbResource, LockType.S, 0L),
+            new Lock(dbResource, LockType.S, 1L)
+        );
+        assertEquals(expected, lockman.getLocks(dbResource));
+
+        runner.joinAll();
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testIXIXCompatible() {
+        // Two IX locks are compatible
+        DeterministicRunner runner = new DeterministicRunner(2);
+        runner.run(0, () -> lockman.acquire(transactions[0], dbResource, LockType.IX));
+        runner.run(1, () -> lockman.acquire(transactions[1], dbResource, LockType.IX));
+
+        assertTrue(holds(lockman, transactions[0], dbResource, LockType.IX));
+        assertTrue(holds(lockman, transactions[1], dbResource, LockType.IX));
+        assertFalse(transactions[0].getBlocked());
+        assertFalse(transactions[1].getBlocked());
+
+        runner.joinAll();
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testISCompatibleWithS() {
+        // IS and S are compatible
+        DeterministicRunner runner = new DeterministicRunner(2);
+        runner.run(0, () -> lockman.acquire(transactions[0], dbResource, LockType.S));
+        runner.run(1, () -> lockman.acquire(transactions[1], dbResource, LockType.IS));
+
+        assertTrue(holds(lockman, transactions[0], dbResource, LockType.S));
+        assertTrue(holds(lockman, transactions[1], dbResource, LockType.IS));
+        assertFalse(transactions[0].getBlocked());
+        assertFalse(transactions[1].getBlocked());
+
+        runner.joinAll();
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testSIXConflictsWithIX() {
+        // SIX and IX conflict; IX holder blocks, unblocks after SIX released
+        DeterministicRunner runner = new DeterministicRunner(2);
+        runner.run(0, () -> lockman.acquire(transactions[0], dbResource, LockType.SIX));
+        runner.run(1, () -> lockman.acquire(transactions[1], dbResource, LockType.IX));
+
+        assertTrue(holds(lockman, transactions[0], dbResource, LockType.SIX));
+        assertFalse(holds(lockman, transactions[1], dbResource, LockType.IX));
+        assertFalse(transactions[0].getBlocked());
+        assertTrue(transactions[1].getBlocked());
+
+        runner.run(0, () -> lockman.release(transactions[0], dbResource));
+
+        assertFalse(holds(lockman, transactions[0], dbResource, LockType.SIX));
+        assertTrue(holds(lockman, transactions[1], dbResource, LockType.IX));
+        assertFalse(transactions[1].getBlocked());
+
+        runner.joinAll();
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testXBlocksIS() {
+        // X conflicts with IS
+        DeterministicRunner runner = new DeterministicRunner(2);
+        runner.run(0, () -> lockman.acquire(transactions[0], dbResource, LockType.X));
+        runner.run(1, () -> lockman.acquire(transactions[1], dbResource, LockType.IS));
+
+        assertTrue(holds(lockman, transactions[0], dbResource, LockType.X));
+        assertFalse(holds(lockman, transactions[1], dbResource, LockType.IS));
+        assertTrue(transactions[1].getBlocked());
+
+        runner.run(0, () -> lockman.release(transactions[0], dbResource));
+
+        assertTrue(holds(lockman, transactions[1], dbResource, LockType.IS));
+        assertFalse(transactions[1].getBlocked());
+
+        runner.joinAll();
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testPromoteInvalidLockType() {
+        // X -> S is not a valid promotion (S not substitutable for X)
+        DeterministicRunner runner = new DeterministicRunner(1);
+        runner.run(0, () -> lockman.acquire(transactions[0], dbResource, LockType.X));
+        try {
+            runner.run(0, () -> lockman.promote(transactions[0], dbResource, LockType.S));
+            fail("Invalid promotion should throw InvalidLockException");
+        } catch (InvalidLockException e) {
+            // expected
+        }
+
+        // Still holds X
+        assertTrue(holds(lockman, transactions[0], dbResource, LockType.X));
+        runner.joinAll();
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testDuplicateAcquireDifferentType() {
+        // T0 holds S; calling acquire(X) on same resource should throw, not silently upgrade
+        DeterministicRunner runner = new DeterministicRunner(1);
+        runner.run(0, () -> lockman.acquire(transactions[0], dbResource, LockType.S));
+        try {
+            runner.run(0, () -> lockman.acquire(transactions[0], dbResource, LockType.X));
+            fail("acquire on already-held resource should throw DuplicateLockRequestException");
+        } catch (DuplicateLockRequestException e) {
+            // expected
+        }
+
+        // Original S lock still held
+        assertTrue(holds(lockman, transactions[0], dbResource, LockType.S));
+        runner.joinAll();
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testPromoteToFrontOfQueue() {
+        // T0 has S, T1 has S.
+        // T0 tries promote S->X (blocked by T1's S, goes to front of queue).
+        // T2 tries acquire X (blocked, goes to back).
+        // T1 releases -> T0's promote granted first; T2 still blocked.
+        DeterministicRunner runner = new DeterministicRunner(3);
+        runner.run(0, () -> lockman.acquire(transactions[0], dbResource, LockType.S));
+        runner.run(1, () -> lockman.acquire(transactions[1], dbResource, LockType.S));
+
+        runner.run(0, () -> lockman.promote(transactions[0], dbResource, LockType.X));
+        runner.run(2, () -> lockman.acquire(transactions[2], dbResource, LockType.X));
+
+        // Queue is [X(T0-promote), X(T2-acquire)]; both blocked
+        assertTrue(transactions[0].getBlocked());
+        assertTrue(transactions[2].getBlocked());
+
+        runner.run(1, () -> lockman.release(transactions[1], dbResource));
+
+        // T0 at front of queue, promoted to X; T2 still blocked behind T0's X
+        assertTrue(holds(lockman, transactions[0], dbResource, LockType.X));
+        assertFalse(transactions[0].getBlocked());
+        assertTrue(transactions[2].getBlocked());
+
+        runner.run(0, () -> lockman.release(transactions[0], dbResource));
+
+        assertTrue(holds(lockman, transactions[2], dbResource, LockType.X));
+        assertFalse(transactions[2].getBlocked());
+
+        runner.joinAll();
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testAcquireAndReleasePriorityOverQueue() {
+        // T0 holds X. T1 acquires X (goes to back). T2 acquireAndRelease X (goes to FRONT).
+        // T0 releases -> T2 granted first; T1 still blocked.
+        DeterministicRunner runner = new DeterministicRunner(3);
+        runner.run(0, () -> lockman.acquire(transactions[0], dbResource, LockType.X));
+        runner.run(1, () -> lockman.acquire(transactions[1], dbResource, LockType.X));
+        runner.run(2, () -> lockman.acquireAndRelease(transactions[2], dbResource, LockType.X,
+                Collections.emptyList()));
+
+        // Queue is [X(T2), X(T1)]; both blocked
+        assertTrue(transactions[1].getBlocked());
+        assertTrue(transactions[2].getBlocked());
+
+        runner.run(0, () -> lockman.release(transactions[0], dbResource));
+
+        // T2 at front, gets X; T1 still blocked
+        assertTrue(holds(lockman, transactions[2], dbResource, LockType.X));
+        assertFalse(transactions[2].getBlocked());
+        assertTrue(transactions[1].getBlocked());
+
+        runner.join(2);
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testBatchGrantOnRelease() {
+        // T0 holds X. Queue: S(T1), S(T2). When T0 releases, both S locks granted together.
+        DeterministicRunner runner = new DeterministicRunner(3);
+        runner.run(0, () -> lockman.acquire(transactions[0], dbResource, LockType.X));
+        runner.run(1, () -> lockman.acquire(transactions[1], dbResource, LockType.S));
+        runner.run(2, () -> lockman.acquire(transactions[2], dbResource, LockType.S));
+
+        assertTrue(transactions[1].getBlocked());
+        assertTrue(transactions[2].getBlocked());
+
+        runner.run(0, () -> lockman.release(transactions[0], dbResource));
+
+        // Both S locks granted; S-S compatible so processQueue grants both in one pass
+        assertTrue(holds(lockman, transactions[1], dbResource, LockType.S));
+        assertTrue(holds(lockman, transactions[2], dbResource, LockType.S));
+        assertFalse(transactions[1].getBlocked());
+        assertFalse(transactions[2].getBlocked());
+
+        runner.joinAll();
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testGetLocksTransaction() {
+        // getLocks(transaction) returns all locks held by that transaction
+        DeterministicRunner runner = new DeterministicRunner(1);
+        runner.run(0, () -> {
+            lockman.acquire(transactions[0], tables[0], LockType.S);
+            lockman.acquire(transactions[0], tables[1], LockType.X);
+        });
+
+        List<Lock> locks = lockman.getLocks(transactions[0]);
+        assertEquals(2, locks.size());
+        assertTrue(locks.contains(new Lock(tables[0], LockType.S, 0L)));
+        assertTrue(locks.contains(new Lock(tables[1], LockType.X, 0L)));
+
+        runner.joinAll();
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testGetLocksResource() {
+        // getLocks(name) returns all locks on that resource
+        DeterministicRunner runner = new DeterministicRunner(2);
+        runner.run(0, () -> lockman.acquire(transactions[0], dbResource, LockType.IS));
+        runner.run(1, () -> lockman.acquire(transactions[1], dbResource, LockType.IS));
+
+        List<Lock> locks = lockman.getLocks(dbResource);
+        assertEquals(2, locks.size());
+        assertTrue(locks.contains(new Lock(dbResource, LockType.IS, 0L)));
+        assertTrue(locks.contains(new Lock(dbResource, LockType.IS, 1L)));
+
+        runner.joinAll();
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testGetLockType() {
+        // getLockType tracks correctly through acquire, promote, release
+        DeterministicRunner runner = new DeterministicRunner(1);
+
+        assertEquals(LockType.NL, lockman.getLockType(transactions[0], dbResource));
+
+        runner.run(0, () -> lockman.acquire(transactions[0], dbResource, LockType.IS));
+        assertEquals(LockType.IS, lockman.getLockType(transactions[0], dbResource));
+
+        runner.run(0, () -> lockman.promote(transactions[0], dbResource, LockType.IX));
+        assertEquals(LockType.IX, lockman.getLockType(transactions[0], dbResource));
+
+        runner.run(0, () -> lockman.release(transactions[0], dbResource));
+        assertEquals(LockType.NL, lockman.getLockType(transactions[0], dbResource));
+
+        runner.joinAll();
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testAcquireAndReleaseMultipleRelease() {
+        // acquireAndRelease can release multiple locks atomically
+        DeterministicRunner runner = new DeterministicRunner(1);
+        runner.run(0, () -> {
+            lockman.acquire(transactions[0], tables[0], LockType.S);
+            lockman.acquire(transactions[0], tables[1], LockType.S);
+            lockman.acquire(transactions[0], tables[2], LockType.S);
+            lockman.acquireAndRelease(transactions[0], tables[3], LockType.X,
+                    Arrays.asList(tables[0], tables[1], tables[2]));
+        });
+
+        assertEquals(LockType.NL, lockman.getLockType(transactions[0], tables[0]));
+        assertEquals(LockType.NL, lockman.getLockType(transactions[0], tables[1]));
+        assertEquals(LockType.NL, lockman.getLockType(transactions[0], tables[2]));
+        assertEquals(LockType.X,  lockman.getLockType(transactions[0], tables[3]));
+
+        List<Lock> locks = lockman.getLocks(transactions[0]);
+        assertEquals(1, locks.size());
+        assertEquals(new Lock(tables[3], LockType.X, 0L), locks.get(0));
+
+        runner.joinAll();
+    }
+
+    @Test
+    @Category(PublicTests.class)
     public void testIntentBlockedAcquire() {
         DeterministicRunner runner = new DeterministicRunner(2);
 

@@ -403,6 +403,300 @@ public class TestLockContext {
 
     @Test
     @Category(PublicTests.class)
+    public void testAcquireNoParentLock() {
+        // Child lock requires parent lock — no parent means InvalidLockException
+        TransactionContext t1 = transactions[1];
+        try {
+            tableLockContext.acquire(t1, LockType.S);
+            fail("Acquiring child lock without parent lock should throw InvalidLockException");
+        } catch (InvalidLockException e) {
+            // expected
+        }
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testReleaseNoLockHeld() {
+        TransactionContext t1 = transactions[1];
+        dbLockContext.acquire(t1, LockType.IS);
+        try {
+            tableLockContext.release(t1);
+            fail("Releasing unheld lock should throw NoLockHeldException");
+        } catch (NoLockHeldException e) {
+            // expected
+        }
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testPromoteToSIX() {
+        // IX(db) + IX(table) + S(page) → promote table IX→SIX → S/IS descendants released atomically
+        TransactionContext t1 = transactions[1];
+        dbLockContext.acquire(t1, LockType.IX);
+        tableLockContext.acquire(t1, LockType.IX);
+        pageLockContext.acquire(t1, LockType.S);
+
+        assertEquals(1, tableLockContext.getNumChildren(t1));
+
+        tableLockContext.promote(t1, LockType.SIX);
+
+        assertTrue(TestLockManager.holds(lockManager, t1, tableLockContext.getResourceName(), LockType.SIX));
+        assertFalse(TestLockManager.holds(lockManager, t1, pageLockContext.getResourceName(), LockType.S));
+        assertEquals(0, tableLockContext.getNumChildren(t1));
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testPromoteStoSIX() {
+        // IX(db) + S(table) + IS(page) → promote table S→SIX → IS descendants released
+        TransactionContext t1 = transactions[1];
+        dbLockContext.acquire(t1, LockType.IX);
+        tableLockContext.acquire(t1, LockType.S);
+        pageLockContext.acquire(t1, LockType.IS);
+
+        tableLockContext.promote(t1, LockType.SIX);
+
+        assertTrue(TestLockManager.holds(lockManager, t1, tableLockContext.getResourceName(), LockType.SIX));
+        assertFalse(TestLockManager.holds(lockManager, t1, pageLockContext.getResourceName(), LockType.IS));
+        assertEquals(0, tableLockContext.getNumChildren(t1));
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testPromoteIStoSIX() {
+        // IX(db) + IS(table) → promote table IS→SIX (no S/IS descendants to release)
+        TransactionContext t1 = transactions[1];
+        dbLockContext.acquire(t1, LockType.IX);
+        tableLockContext.acquire(t1, LockType.IS);
+
+        tableLockContext.promote(t1, LockType.SIX);
+
+        assertTrue(TestLockManager.holds(lockManager, t1, tableLockContext.getResourceName(), LockType.SIX));
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testPromoteChildContext() {
+        // IX(db) + IS(table) → promote table IS→IX; parent numChildLocks unchanged
+        TransactionContext t1 = transactions[1];
+        dbLockContext.acquire(t1, LockType.IX);
+        tableLockContext.acquire(t1, LockType.IS);
+
+        assertEquals(1, dbLockContext.getNumChildren(t1));
+
+        tableLockContext.promote(t1, LockType.IX);
+
+        assertTrue(TestLockManager.holds(lockManager, t1, tableLockContext.getResourceName(), LockType.IX));
+        assertTrue(TestLockManager.holds(lockManager, t1, dbLockContext.getResourceName(), LockType.IX));
+        assertEquals(1, dbLockContext.getNumChildren(t1));
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testAcquireRedundantUnderSIX() {
+        // SIX on ancestor already grants S to all descendants — acquiring S/IS below is redundant/invalid
+        TransactionContext t1 = transactions[1];
+        dbLockContext.acquire(t1, LockType.SIX);
+        try {
+            tableLockContext.acquire(t1, LockType.IS);
+            fail("Acquiring IS under SIX ancestor should throw InvalidLockException");
+        } catch (InvalidLockException e) {
+            // expected
+        }
+        try {
+            tableLockContext.acquire(t1, LockType.S);
+            fail("Acquiring S under SIX ancestor should throw InvalidLockException");
+        } catch (InvalidLockException e) {
+            // expected
+        }
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testPromoteToSIXWithSIXAncestor() {
+        // SIX already on ancestor — redundant SIX on descendant is invalid
+        TransactionContext t1 = transactions[1];
+        dbLockContext.acquire(t1, LockType.SIX);
+        tableLockContext.acquire(t1, LockType.IX);
+
+        try {
+            tableLockContext.promote(t1, LockType.SIX);
+            fail("Promoting to SIX with SIX ancestor should throw InvalidLockException");
+        } catch (InvalidLockException e) {
+            // expected
+        }
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testPromoteFailInvalidParentConstraint() {
+        // IS(db) + IS(table) → promote table IS→X: canBeParentLock(IS, X)=false
+        TransactionContext t1 = transactions[1];
+        dbLockContext.acquire(t1, LockType.IS);
+        tableLockContext.acquire(t1, LockType.IS);
+
+        try {
+            tableLockContext.promote(t1, LockType.X);
+            fail("Promoting to X with IS parent should throw InvalidLockException");
+        } catch (InvalidLockException e) {
+            // expected
+        }
+
+        assertTrue(TestLockManager.holds(lockManager, t1, tableLockContext.getResourceName(), LockType.IS));
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testEscalateX() {
+        // IX(db) + IX(table) + X(page) → escalate table → X(table), page released
+        TransactionContext t1 = transactions[1];
+        dbLockContext.acquire(t1, LockType.IX);
+        tableLockContext.acquire(t1, LockType.IX);
+        pageLockContext.acquire(t1, LockType.X);
+
+        assertEquals(1, tableLockContext.getNumChildren(t1));
+
+        tableLockContext.escalate(t1);
+
+        assertTrue(TestLockManager.holds(lockManager, t1, tableLockContext.getResourceName(), LockType.X));
+        assertFalse(TestLockManager.holds(lockManager, t1, pageLockContext.getResourceName(), LockType.X));
+        assertEquals(0, tableLockContext.getNumChildren(t1));
+        // Parent db lock unchanged
+        assertTrue(TestLockManager.holds(lockManager, t1, dbLockContext.getResourceName(), LockType.IX));
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testEscalateMixedDescendants() {
+        // IX(db) + IX(table) + S(page1) + X(page2) → escalate table → X (X present)
+        TransactionContext t1 = transactions[1];
+        LockContext page2 = tableLockContext.childContext("page2");
+
+        dbLockContext.acquire(t1, LockType.IX);
+        tableLockContext.acquire(t1, LockType.IX);
+        pageLockContext.acquire(t1, LockType.S);
+        page2.acquire(t1, LockType.X);
+
+        assertEquals(2, tableLockContext.getNumChildren(t1));
+
+        tableLockContext.escalate(t1);
+
+        assertTrue(TestLockManager.holds(lockManager, t1, tableLockContext.getResourceName(), LockType.X));
+        assertFalse(TestLockManager.holds(lockManager, t1, pageLockContext.getResourceName(), LockType.S));
+        assertFalse(TestLockManager.holds(lockManager, t1, page2.getResourceName(), LockType.X));
+        assertEquals(0, tableLockContext.getNumChildren(t1));
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testEscalateDbLevel() {
+        // IX(db) + X(table) → escalate db → X(db), table released, numChildren=0
+        TransactionContext t1 = transactions[1];
+        dbLockContext.acquire(t1, LockType.IX);
+        tableLockContext.acquire(t1, LockType.X);
+
+        assertEquals(1, dbLockContext.getNumChildren(t1));
+
+        dbLockContext.escalate(t1);
+
+        assertTrue(TestLockManager.holds(lockManager, t1, dbLockContext.getResourceName(), LockType.X));
+        assertFalse(TestLockManager.holds(lockManager, t1, tableLockContext.getResourceName(), LockType.X));
+        assertEquals(0, dbLockContext.getNumChildren(t1));
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testEffectiveLockTypeSIXAncestor() {
+        // SIX(db) → no explicit lock at table/page, but effective = S (SIX implies S on descendants)
+        TransactionContext t1 = transactions[1];
+        dbLockContext.acquire(t1, LockType.SIX);
+
+        assertEquals(LockType.NL, tableLockContext.getExplicitLockType(t1));
+        assertEquals(LockType.NL, pageLockContext.getExplicitLockType(t1));
+        assertEquals(LockType.S, tableLockContext.getEffectiveLockType(t1));
+        assertEquals(LockType.S, pageLockContext.getEffectiveLockType(t1));
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testEffectiveLockTypeXAncestor() {
+        // X(db) → effective = X at table and page (no explicit lock needed below)
+        TransactionContext t1 = transactions[1];
+        dbLockContext.acquire(t1, LockType.X);
+
+        assertEquals(LockType.NL, tableLockContext.getExplicitLockType(t1));
+        assertEquals(LockType.X, tableLockContext.getEffectiveLockType(t1));
+        assertEquals(LockType.X, pageLockContext.getEffectiveLockType(t1));
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testEffectiveLockTypeNoAncestor() {
+        // IS/IX on ancestors don't count as effective locks on descendants
+        TransactionContext t1 = transactions[1];
+        dbLockContext.acquire(t1, LockType.IX);
+        tableLockContext.acquire(t1, LockType.IS);
+
+        assertEquals(LockType.NL, pageLockContext.getEffectiveLockType(t1));
+        assertEquals(LockType.NL, pageLockContext.getExplicitLockType(t1));
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testNumChildLocksTracking() {
+        // numChildLocks stays accurate through acquire/release
+        TransactionContext t1 = transactions[1];
+        LockContext table2 = dbLockContext.childContext("table2");
+
+        assertEquals(0, dbLockContext.getNumChildren(t1));
+
+        dbLockContext.acquire(t1, LockType.IX);
+        tableLockContext.acquire(t1, LockType.X);
+        assertEquals(1, dbLockContext.getNumChildren(t1));
+
+        table2.acquire(t1, LockType.X);
+        assertEquals(2, dbLockContext.getNumChildren(t1));
+
+        tableLockContext.release(t1);
+        assertEquals(1, dbLockContext.getNumChildren(t1));
+
+        table2.release(t1);
+        assertEquals(0, dbLockContext.getNumChildren(t1));
+    }
+
+    @Test
+    @Category(PublicTests.class)
+    public void testConcurrentPageConflict() {
+        // T1 and T2 both hold IX on db and table; T1 holds X on page; T2 blocks acquiring X on page
+        DeterministicRunner runner = new DeterministicRunner(2);
+        TransactionContext t1 = transactions[1];
+        TransactionContext t2 = transactions[2];
+
+        runner.run(0, () -> {
+            dbLockContext.acquire(t1, LockType.IX);
+            tableLockContext.acquire(t1, LockType.IX);
+            pageLockContext.acquire(t1, LockType.X);
+        });
+        runner.run(1, () -> {
+            dbLockContext.acquire(t2, LockType.IX);
+            tableLockContext.acquire(t2, LockType.IX);
+        });
+        runner.run(1, () -> pageLockContext.acquire(t2, LockType.X));
+
+        // T2 blocked — X(t1) conflicts with X(t2) on page
+        assertFalse(TestLockManager.holds(lockManager, t2, pageLockContext.getResourceName(), LockType.X));
+        assertTrue(t2.getBlocked());
+
+        runner.run(0, () -> pageLockContext.release(t1));
+
+        assertTrue(TestLockManager.holds(lockManager, t2, pageLockContext.getResourceName(), LockType.X));
+        assertFalse(t2.getBlocked());
+
+        runner.join(1);
+    }
+
+    @Test
+    @Category(PublicTests.class)
     public void testGetNumChildren() {
         LockContext tableContext = dbLockContext.childContext("table2");
         TransactionContext t1 = transactions[1];

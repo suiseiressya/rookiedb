@@ -106,6 +106,9 @@ public class LockContext {
             LockType parentLockType = parent.getExplicitLockType(transaction);
             if (!LockType.canBeParentLock(parentLockType, lockType))
                 throw new InvalidLockException("invalid parent lock");
+
+            if (hasSIXAncestor(transaction) && (lockType == LockType.S || lockType == LockType.IS))
+                throw new InvalidLockException("cannot acquire IS/S when ancestor is SIX");
         }
 
         lockman.acquire(transaction, name, lockType);
@@ -178,6 +181,7 @@ public class LockContext {
 
         if (newLockType == LockType.SIX) {
             List<ResourceName> releaseNames = sisDescendants(transaction);
+            releaseNames.add(this.name);
             lockman.acquireAndRelease(transaction, name, newLockType, releaseNames);
 
             long txNum = transaction.getTransNum();
@@ -231,11 +235,9 @@ public class LockContext {
             throw new NoLockHeldException("cannot escalate: no lock held");
 
         LockType currentLockType = getExplicitLockType(transaction);
-        System.out.println("Current lock type " + currentLockType);
         LockType newLockType = currentLockType.isExclusive()
                 ? LockType.X
                 : LockType.S;
-        System.out.println("new Lock type " + newLockType);
         List<ResourceName> releaseNames = new ArrayList<>();
 
         for (Lock lock: lockman.getLocks(transaction)) {
