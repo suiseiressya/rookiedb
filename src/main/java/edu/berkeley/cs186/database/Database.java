@@ -935,8 +935,10 @@ public class Database implements AutoCloseable {
         public void close() {
             try {
                 List<Lock> locks = Database.this.lockManager.getLocks(this);
-                for (int i = locks.size() - 1; i >= 0; i--) {
-                    Lock lock = locks.get(i);
+                // sort by size: longer size means deeper
+                locks.sort((a, b) ->
+                        b.name.getNames().size() - a.name.getNames().size());
+                for (Lock lock: locks) {
                     LockContext ctx = LockContext.fromResourceName(Database.this.lockManager, lock.name);
                     ctx.release(this);
                 }

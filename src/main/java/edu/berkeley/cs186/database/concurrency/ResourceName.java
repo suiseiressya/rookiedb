@@ -69,7 +69,7 @@ public class ResourceName {
      * @return this resource's names, e.g. a list like the following:
      * - ["database, "someTable", "10"]
      */
-    List<String> getNames() {
+    public List<String> getNames() {
         return names;
     }
 
