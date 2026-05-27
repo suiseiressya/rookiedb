@@ -2,6 +2,9 @@ package edu.berkeley.cs186.database.concurrency;
 
 import edu.berkeley.cs186.database.TransactionContext;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * LockUtil is a declarative layer which simplifies multigranularity lock
  * acquisition for the user (you, in the last task of Part 2). Generally
@@ -42,8 +45,69 @@ public class LockUtil {
         LockType explicitLockType = lockContext.getExplicitLockType(transaction);
 
         // TODO(proj4_part2): implement
-        return;
+        // if can substitute: do nothing
+        if (LockType.substitutable(effectiveLockType, requestType)) return;
+
+        // if explicit = IX and request = S, promote directly to SIX
+        // if ancestor have SIX, substitutable() above would have caught it
+        // and S cannot be children of SIX
+        if (explicitLockType == LockType.IX && requestType == LockType.S) {
+            lockContext.promote(transaction, LockType.SIX);
+            return;
+        }
+
+        // update all ancestors lock before changing current
+        ensureAncestorLockSufficient(lockContext, requestType, transaction);
+
+        // intent: escalate
+        if (explicitLockType.isIntent()) {
+            lockContext.escalate(transaction);
+
+            // if escalated to S but requestType is X, promote
+            // ancestors updated in ensureAncestorLockSufficient
+            if (requestType == LockType.X && lockContext.getExplicitLockType(transaction) == LockType.S)
+                lockContext.promote(transaction, requestType);
+        }
+        else if (explicitLockType == LockType.NL) lockContext.acquire(transaction, requestType);
+        else if (explicitLockType == LockType.S) {
+            // requestType only S, X, NL
+            // S, NL caught above, only X left
+            lockContext.promote(transaction, requestType);
+        }
+        // explicit = X: skip (highest lock possible)
     }
 
     // TODO(proj4_part2) add any helper methods you want
+    public static void ensureAncestorLockSufficient(LockContext lockContext,
+                                                    LockType requestType,
+                                                    TransactionContext transaction) {
+        LockType required = LockType.parentLock(requestType); // IS or IX
+
+        List<LockContext> ancestors = new ArrayList<>();
+        LockContext ctx = lockContext.getParentContext();
+
+        while (ctx != null) {
+            ancestors.add(ctx);
+            ctx = ctx.getParentContext();
+        }
+
+        // update from top down
+        for (int i = ancestors.size() - 1; i >= 0; i--) {
+            LockType current = ancestors.get(i).getExplicitLockType(transaction);
+            if (current == LockType.NL) ancestors.get(i).acquire(transaction, required);
+            else if (required == LockType.IX) {
+                if (current == LockType.S) {
+                    try {
+                        ancestors.get(i).promote(transaction, LockType.SIX);
+                    } catch (InvalidLockException e) {
+                        ancestors.get(i).promote(transaction, LockType.X);
+                    }
+                }
+                else if (current == LockType.IS) ancestors.get(i).promote(transaction, required);
+
+                // current = X, IX, SIX: ok
+            }
+            // else: required = IS: current = anything is ok (NL handled above)
+        }
+    }
 }
