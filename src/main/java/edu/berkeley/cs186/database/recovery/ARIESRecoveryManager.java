@@ -92,8 +92,16 @@ public class ARIESRecoveryManager implements RecoveryManager {
      */
     @Override
     public long commit(long transNum) {
-        // TODO(proj5): implement
-        return -1L;
+        TransactionTableEntry entry = transactionTable.get(transNum);
+        long lastLSN = entry.lastLSN;
+
+        long curLSN = logManager.appendToLog(new CommitTransactionLogRecord(transNum, lastLSN));
+        logManager.flushToLSN(curLSN);
+
+        entry.transaction.setStatus(Transaction.Status.COMMITTING);
+        entry.lastLSN = curLSN;
+
+        return curLSN;
     }
 
     /**
@@ -108,8 +116,14 @@ public class ARIESRecoveryManager implements RecoveryManager {
      */
     @Override
     public long abort(long transNum) {
-        // TODO(proj5): implement
-        return -1L;
+        TransactionTableEntry entry = transactionTable.get(transNum);
+        long lastLSN = entry.lastLSN;
+
+        long curLSN = logManager.appendToLog(new AbortTransactionLogRecord(transNum, lastLSN));
+        entry.transaction.setStatus(Transaction.Status.ABORTING);
+        entry.lastLSN = curLSN;
+
+        return curLSN;
     }
 
     /**
@@ -127,7 +141,19 @@ public class ARIESRecoveryManager implements RecoveryManager {
     @Override
     public long end(long transNum) {
         // TODO(proj5): implement
-        return -1L;
+        TransactionTableEntry entry = transactionTable.get(transNum);
+
+        // rollback if abort
+        if (entry.transaction.getStatus() == Transaction.Status.ABORTING)
+            rollbackToLSN(transNum, 0);
+
+        long curLSN = logManager.appendToLog(new EndTransactionLogRecord(transNum, entry.lastLSN));
+        entry.transaction.setStatus(Transaction.Status.COMPLETE);
+        entry.lastLSN = curLSN;
+
+        transactionTable.remove(transNum);
+
+        return curLSN;
     }
 
     /**
@@ -150,11 +176,44 @@ public class ARIESRecoveryManager implements RecoveryManager {
     private void rollbackToLSN(long transNum, long LSN) {
         TransactionTableEntry transactionEntry = transactionTable.get(transNum);
         LogRecord lastRecord = logManager.fetchLogRecord(transactionEntry.lastLSN);
-        long lastRecordLSN = lastRecord.getLSN();
-        // Small optimization: if the last record is a CLR we can start rolling
-        // back from the next record that hasn't yet been undone.
-        long currentLSN = lastRecord.getUndoNextLSN().orElse(lastRecordLSN);
+
+        /*** LSN of current record
+         *
+         * use getUndoNextLSN() instead of getPrevLSN()
+         * in case of crash mid-rollback, some rollback has been done
+         * if call getPrevLSN(), go back in log record one by one
+         * might double rollback some entries that already has been rolled back
+         * call getUndoNextLSN() - correctly point to actual next lsn to undo
+         *
+         * in case of no partial rollback, getUndoNextLSN() just return null
+         * and becomes lastLSN since getUndoNextLSN() is only supposed to be used
+         * on CLRs
+         **/
+        long currentLSN = lastRecord.getUndoNextLSN().orElse(transactionEntry.lastLSN);
         // TODO(proj5) implement the rollback logic described above
+
+        while (currentLSN > LSN) {
+            LogRecord currentRecord = logManager.fetchLogRecord(currentLSN);
+
+            // if undoable then undo, else skip
+            // e.g. skip ABORT record
+            if (currentRecord.isUndoable()) {
+                // write a clr wrt the CURRENT RECORD (i.e. record at CURRENT LSN)
+                // to the log manager (WAL - write before rollback)
+                // lastLSN will be prevLSN of the new clr
+                // the name undo() is misleading - ONLY WRITE CLR, DOES NOT ROLLBACK
+                LogRecord clr = currentRecord.undo(transactionEntry.lastLSN);
+
+                // update lastLSN to be new LSN of clr after appending to log
+                transactionEntry.lastLSN = logManager.appendToLog(clr);
+
+                // now perform actual rollback
+                clr.redo(this, diskSpaceManager, bufferManager);
+            }
+
+            // move currentLSN back to prevLSN
+            currentLSN = currentRecord.getPrevLSN().orElse(LSN);
+        }
     }
 
     /**
